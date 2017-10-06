@@ -1759,6 +1759,70 @@ namespace MongoDB.Driver
             VerifySingleWrite(expectedRequest, bypassDocumentValidation, true, call);
         }
 
+        [Fact]
+        public void qqq()
+        {
+            var filter = BsonDocument.Parse(@"{fn:""1""}");
+            //var update = BsonDocument.Parse("{$set:{a:1}}");
+            var update = Update2(new Person(), x => x.Age, x => x.FirstName);
+
+            var collation = new Collation("en_US");
+            var expectedRequest = new UpdateRequest(UpdateType.Update, filter, update.ToBsonDocument()) { Collation = collation, CorrelationId = 0, IsUpsert = false, IsMulti = false };
+            var operationResult = new BulkWriteOperationResult.Unacknowledged(9, new[] { expectedRequest });
+            _operationExecutor.EnqueueResult<BulkWriteOperationResult>(operationResult);
+
+            var subject = CreateSubject<Person>();
+
+
+            subject.UpdateOne(filter, update);
+            
+
+            var call = _operationExecutor.GetWriteCall<BulkWriteOperationResult>();
+            WriteRequest[] expectedRequests = new[] { expectedRequest };
+            call.Operation.Should().BeOfType<BulkMixedWriteOperation>();
+            var operation = (BulkMixedWriteOperation)call.Operation;
+
+            operation.CollectionNamespace.FullName.Should().Be("foo.bar");
+            operation.IsOrdered.Should().Be(true);
+
+            var actualRequests = operation.Requests.ToList();
+            actualRequests.Count.Should().Be(expectedRequests.Length);
+
+            for (int i = 0; i < expectedRequests.Length; i++)
+            {
+                expectedRequests[i].ShouldBeEquivalentTo(actualRequests[i]);
+            }
+        }
+
+
+        private class Person
+        {
+            [BsonElement("fn")]
+            public string FirstName { get; set; }
+
+            [BsonElement("colors")]
+            public string[] FavoriteColors { get; set; }
+
+            [BsonElement("age")]
+            public int Age { get; set; }
+
+            [BsonElement("last_updated")]
+            public DateTime LastUpdated { get; set; }
+        }
+
+        private UpdateDefinition<Person> Update2(Person test, params Expression<Func<Person, object>>[] fields)
+        {
+            UpdateDefinition<Person> update = null;
+
+            foreach (var field in fields)
+                update = update == null
+                        ? Builders<Person>.Update.Set(field, field.Compile()(test))
+                        : update.Set(field, field.Compile()(test))
+                    ;
+
+            return update;
+        }
+
         [Theory]
         [ParameterAttributeData]
         public void UpdateOne_should_throw_a_WriteException_when_an_error_occurs(
